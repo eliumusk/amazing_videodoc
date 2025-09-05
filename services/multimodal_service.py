@@ -1,24 +1,25 @@
 """多模态服务 - 统一的帧提取、嵌入生成和去重服务"""
-import os,base64,time,logging,tempfile,shutil,json,concurrent.futures,threading
+import os,base64,time,logging,tempfile,shutil,json,concurrent.futures,threading,requests
 from typing import List,Optional,Dict,Any,Tuple
 from datetime import datetime
 from pathlib import Path
-import cohere,numpy as np
+import numpy as np
 from services.ffmpeg_process import VideoProcessor
 
 class MultimodalService:
     """多模态服务 - 统一处理帧提取、嵌入生成和去重"""
-    EMBED_MODEL="embed-v4.0"
+    EMBED_MODEL="jina-embeddings-v4"
     BATCH_SIZE=10
     API_DELAY=0.1
+    JINA_API_URL="https://api.jina.ai/v1/embeddings"
     IMG_FORMATS={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp'}
 
-    def __init__(self,cohere_api_key:str,ffmpeg_path:str="ffmpeg",similarity_threshold:float=0.9,
+    def __init__(self,jina_api_key:str,ffmpeg_path:str="ffmpeg",similarity_threshold:float=0.9,
                  embedding_model:str=EMBED_MODEL,batch_size:int=BATCH_SIZE,frame_fps:float=0.2,
                  max_concurrent_segments:int=3,enable_text_alignment:bool=True,max_aligned_frames:int=3,
                  logger:Optional[logging.Logger]=None):
         """初始化多模态服务"""
-        self.api_key=cohere_api_key
+        self.api_key=jina_api_key
         self.sim_thresh=similarity_threshold
         self.embed_model=embedding_model
         self.batch_sz=batch_size
@@ -26,7 +27,7 @@ class MultimodalService:
         self.max_workers=max_concurrent_segments
         self.enable_text_alignment=enable_text_alignment
         self.max_aligned_frames=max_aligned_frames
-        self.client=cohere.ClientV2(api_key=cohere_api_key)
+        self.api_url=self.JINA_API_URL
         self.video_proc=VideoProcessor(ffmpeg_path)
         self.logger=logger or logging.getLogger(__name__)
         self._lock=threading.Lock()
@@ -43,10 +44,10 @@ class MultimodalService:
         return "image/jpeg"
 
     def _to_base64(self,path:str)->str:
-        """转换图片为base64格式"""
+        """转换图片为base64格式（Jina AI 需要纯 base64，不带 data: 前缀）"""
         with open(path,"rb") as f:
             data=base64.b64encode(f.read()).decode('utf-8')
-            return f"data:{self._get_mime_type(path)};base64,{data}"
+            return data
 
     def generate_embeddings(self,paths:List[str],batch_size:Optional[int]=None,lock:Optional[object]=None)->Tuple[List[np.ndarray],List[str]]:
         """批量获取图片embeddings"""
@@ -61,7 +62,7 @@ class MultimodalService:
             for p in batch:
                 try:
                     b64=self._to_base64(p)
-                    data.append({"content":[{"type":"image_url","image_url":{"url":b64}}]})
+                    data.append({"image":b64})
                     valid.append(p)
                 except Exception as e:
                     self.logger.warning(f"Failed to process {p}: {e}")
@@ -84,12 +85,41 @@ class MultimodalService:
         return embeds,success
 
     def _call_api(self,data:List[Dict[str,Any]])->List[np.ndarray]:
-        """调用Cohere API获取embeddings"""
+        """调用 Jina AI API 获取 embeddings"""
         try:
-            resp=self.client.embed(model=self.embed_model,input_type="image",embedding_types=["float"],inputs=data)
-            return [np.array(e) for e in resp.embeddings.float_]
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
+            }
+
+            payload = {
+                "model": self.embed_model,
+                "task": "text-matching",
+                "input": data
+            }
+
+            response = requests.post(self.api_url, headers=headers, json=payload)
+            response.raise_for_status()
+
+            result = response.json()
+
+            # Jina AI 返回格式: {"data": [{"embedding": [...]}, ...]}
+            if "data" not in result:
+                raise RuntimeError(f"Unexpected Jina AI response format: {result}")
+
+            embeddings = []
+            for item in result["data"]:
+                if "embedding" in item:
+                    embeddings.append(np.array(item["embedding"]))
+                else:
+                    raise RuntimeError(f"Missing embedding in response item: {item}")
+
+            return embeddings
+
+        except requests.exceptions.RequestException as e:
+            raise RuntimeError(f"Jina AI API request error: {e}")
         except Exception as e:
-            raise RuntimeError(f"Cohere API error: {e}")
+            raise RuntimeError(f"Jina AI API error: {e}")
 
     @staticmethod
     def calc_similarity(e1:np.ndarray,e2:np.ndarray)->float:
@@ -235,10 +265,8 @@ class MultimodalService:
 
         try:
             # 1. 获取文本嵌入
-            text_input={"content":[{"type":"text","text":text_summary}]}
-            text_resp=self.client.embed(model=self.embed_model,input_type="search_query",
-                                       embedding_types=["float"],inputs=[text_input])
-            text_embed=np.array(text_resp.embeddings.float_[0])
+            text_input=[{"text":text_summary}]
+            text_embed=self._call_api(text_input)[0]
 
             # 2. 获取图像嵌入
             img_embeds,valid_paths=self.generate_embeddings(frame_paths)
@@ -369,6 +397,6 @@ class MultimodalService:
         return "\n".join(lines)
 
 
-def create_multimodal_service(cohere_api_key:str,enable_text_alignment:bool=True,**kwargs)->MultimodalService:
+def create_multimodal_service(jina_api_key:str,enable_text_alignment:bool=True,**kwargs)->MultimodalService:
     """便捷函数：创建多模态服务"""
-    return MultimodalService(cohere_api_key,enable_text_alignment=enable_text_alignment,**kwargs)
+    return MultimodalService(jina_api_key,enable_text_alignment=enable_text_alignment,**kwargs)

@@ -7,7 +7,7 @@ lancedb>=0.3.0            # 向量数据库
 pyarrow>=10.0.0           # LanceDB依赖
 
 # 视频帧去重功能依赖
-cohere>=5.0.0             # 用于调用Cohere API
+# cohere>=5.0.0             # 已替换为 Jina AI API
 numpy>=1.21.0             # 用于向量计算
 Pillow>=8.0.0             # 用于图片处理
 scipy>=1.7.0              # 用于高级数学计算

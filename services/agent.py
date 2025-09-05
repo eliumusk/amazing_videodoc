@@ -9,14 +9,14 @@ from agno.knowledge.text import TextKnowledgeBase
 from agno.vectordb.lancedb import LanceDb
 from agno.vectordb.search import SearchType
 from agno.models.openai import OpenAIChat
-from agno.embedder.cohere import CohereEmbedder
+from agno.embedder.jina import JinaEmbedder
 
 logger = logging.getLogger(__name__)
 
 class VideoNotesAgentService:
     """视频笔记Agent服务"""
 
-    embedder = CohereEmbedder()
+    embedder = JinaEmbedder()
 
     def __init__(self):
         self.agent_sessions: Dict[str, Agent] = {}
@@ -28,7 +28,7 @@ class VideoNotesAgentService:
             table_name=f"notes_{task_id}",
             uri=f"/tmp/lancedb/{task_id}",
             search_type=SearchType.vector,
-            embedder=CohereEmbedder(),
+            embedder=JinaEmbedder(),
         )
 
     def _convert_json_to_text(self, json_data: dict) -> str:
@@ -104,7 +104,7 @@ class VideoNotesAgentService:
             knowledge_base = TextKnowledgeBase(
                 path=str(temp_text_path),
                 vector_db=vector_db,
-                embedder=CohereEmbedder(),
+                embedder=JinaEmbedder(),
             )
 
             # 加载知识库（首次加载时重建索引）

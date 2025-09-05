@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     MODEL_ID: str = Field(default="mistralai/ministral-8b")
     OPENAI_API_KEY: str | None = None
     OPENAI_BASE_URL: str | None = None
-    COHERE_API_KEY: str | None = None
+    JINA_API_KEY: str | None = None
     TENCENT_APPID: str | None = None
     TENCENT_SECRET_ID: str | None = None
     TENCENT_SECRET_KEY: str | None = None
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     MULTIMODAL_MAX_CONCURRENT_SEGMENTS: int = 3
     MULTIMODAL_ENABLE_TEXT_ALIGNMENT: bool = True
     MULTIMODAL_MAX_ALIGNED_FRAMES: int = 3
-    MULTIMODAL_EMBED_MODEL: str = "embed-v4.0"
+    MULTIMODAL_EMBED_MODEL: str = "jina-embeddings-v4"
     MULTIMODAL_BATCH_SIZE: int = 10
     MULTIMODAL_API_DELAY: float = 0.1
 
